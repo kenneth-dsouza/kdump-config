@@ -1,0 +1,158 @@
+.TH kdump-config 1
+
+.SH NAME
+kdump-config  [-h] [--path] [--raw] [--nfs] [--ssh] [--sshkey] [--showconfig] [--local_fs] [--unset]
+              [--force_no_rebuild {1,0}] [--force_rebuild {1,0}] [--fence_kdump_nodes  [...]]
+              [--extra_bins  [...]] [--extra_modules  [...]] [--kdump_post] [--kdump_pre]
+              [--default {reboot,halt,poweroff,shell,dump_to_rootfs}]
+
+.SH DESCRIPTION 
+
+kdump-config is a cmdline tool to edit and retrieve configuration settings from /etc/kdump.conf.
+
+.SH OPTIONS
+
+.B --raw <partition>
+.RS
+Specify raw device example: /dev/sdc1
+Use persistent device names for partition devices, such as /dev/vg/<devname>.
+.RE
+
+.B --nfs <nfs mount>
+.RS
+Specify nfs-sever as dump target.
+.RE
+
+.B --ssh <user@server>
+.RS
+Specify ssh-server as dump target.
+.RE
+
+.B --showconfig
+To display current configuration settings.
+
+.B --sshkey <path>
+.RS
+Specify the path of the ssh key to use when dumping via ssh.
+.RE
+
+.B --local_fs <device>
+.RS
+Specify local system device as dump target.
+.RE
+
+.B --path <path>
+.RS
+Specify the file system path in which vmcore will be saved.
+.RE
+
+.B --kdump_post <binary | script>
+.RS
+Specify an executable to be run just after the vmcore dump process terminates. 
+.PP
+Note that scripts written for use with this directive must use
+the /bin/bash interpreter.
+.RE
+
+.B --kdump_pre <binary | script>
+.RS
+Works just like the "kdump_post" directive, but instead
+of running after the dump process, runs immediately
+before.  Exit status of this binary is interpreted
+as follows:
+.PP
+0 - continue with dump process as usual
+.PP
+non 0 - reboot the system
+.PP
+Note that scripts written for this directive must use
+the /bin/bash interpreter.
+.RE
+
+.B --extra_bins <binaries | shell scripts>
+.RS
+Specify additional binaries or shell scripts you'd like to include in
+your kdump initrd. 
+.RE
+
+.B --extra_modules <module(s)>
+.RS
+Specify extra kernel modules that you want to be loaded in the kdump
+initrd. Multiple modules can be listed, separated by spaces, and any
+dependent modules will automatically be included.
+.RE
+
+.B --default <reboot | halt | poweroff | shell | dump_to_rootfs>
+.RS
+Specify an action to perform in case dumping to the intended target fails.
+.RE
+
+.B --force_rebuild <0 | 1>
+.RS
+By default, kdump initrd will only be rebuilt when necessary.
+Specify 1 to force rebuilding kdump initrd every time when kdump service starts.
+.RE
+
+.B --force_no_rebuild <0 | 1>
+.RS
+By default, kdump initrd will be rebuilt when necessary.
+Specify 1 to bypass rebuilding of kdump initrd.
+.RE
+
+.B --fence_kdump_nodes <node(s)>
+.RS
+List of cluster node(s) except localhost, separated by spaces, to send fence_kdump notification
+to (this option is mandatory to enable fence_kdump).
+.RE
+
+.B --unset <option>
+.RS
+To unset a given option from configuration file.
+.RE
+
+.B --help -h
+.RS
+Print help explaining the command line options.
+.RE
+
+.SH NOTE:
+For filesystem dumps the dump target must be mounted before building
+kdump initramfs.
+.PP
+force_no_rebuild and force_rebuild options are mutually exclusive and
+they should not be set to 1 simultaneously.
+
+
+.SH EXAMPLES
+Here are some examples for kdump-config:
+ 
+For nfs option you can either specify the nfs-server or the nfs mountpoint.
+Provided that the nfs share is mounted.
+
+.B kdump-config --nfs  my.server.com:/export/tmp
+
+.B kdump-config --nfs /nfs 
+
+For dump target as local_fs.
+
+.B kdump-config --local_fs /dev/myvg/mylv
+
+Above will add <fstype> UUID=<> in configuration file.
+
+To unset a given option from configuration file.
+
+.B kdump-config --unset path
+
+To sepcify extra_modules or extra_bins.
+
+.B kdump-config --extra_modules gfs2 ext3
+
+.B kdump-config --extra_bins /usr/bin/lftp /usr/bin/scp
+
+.SH SEE ALSO
+
+kdump.conf(5) kexec(8) mkdumprd(8) dracut.cmdline(7)
+
+.SH AUTHOR
+Kenneth D'souza <kdsouza@redhat.com>
+
