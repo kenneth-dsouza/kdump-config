@@ -1,0 +1,11 @@
+kdump-config is a cmdline tool to edit and retrieve information 
+from /etc/kdump.conf.
+This tool will avoid typos and have basic sanity check for options.
+
+kdump-config is written in python.
+
+
+Written by Kenneth D'souza <kdsouza @ redhat.com>.
+For new versions, look at <>
+
+
