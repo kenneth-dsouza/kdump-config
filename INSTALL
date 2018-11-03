@@ -1,0 +1,7 @@
+You must have python installed.
+Python3 is recommended.
+
+edit first line of kdump-config to point to your python interpreter,
+copy kdump-config somewhere into your path,
+copy kdump-config.1 where your manpages reside (e.g. /usr/local/man/man1)
+
