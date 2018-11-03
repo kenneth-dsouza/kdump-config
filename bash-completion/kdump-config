@@ -1,0 +1,58 @@
+# bash completion for kdump-config     -*- shell-script -*-
+kdump_config()
+{
+        local cur prev DEVS OPTS
+	COMPREPLY=()
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+        DEVS=''; while read dev; do DEVS+="$dev " ; done < <(lsblk -pnro name)
+        OPTS="--help
+              --path
+              --raw 
+              --nfs
+              --ssh
+              --sshkey
+              --showconfig
+              --local_fs
+              --unset
+              --force_no_rebuild
+              --force_rebuild
+              --fence_kdump_nodes
+              --extra_bins
+              --extra_modules
+              --kdump_post
+              --kdump_pre
+	      --default"
+        case $prev in
+		--help|--showconfig|--ssh|--unset|--fence_kdump_nodes)
+			return 0
+			;;
+		 --path|--nfs)
+			local IFS=$'\n'
+                        compopt -o filenames
+                        COMPREPLY=( $(compgen -o dirnames -- ${cur:-"/"}) )
+                        return 0
+                        ;;
+	        --sshkey|--extra_bins|--extra_modules|--kdump_post|--kdump_pre)
+			local IFS=$'\n'
+                        compopt -o filenames
+                        COMPREPLY=( $(compgen -f -- $cur) )
+                        return 0
+                        ;;
+	        --raw|--local_fs)
+                        COMPREPLY=( $(compgen -W "$DEVS" -- $cur) )		
+			return 0
+			;;
+                --force_rebuild|--force_no_rebuild)
+			COMPREPLY=( $( compgen -W '0 1' -- "$cur" ) )
+                        return 0
+                        ;;			
+		--default)
+		         COMPREPLY=( $( compgen -W 'reboot halt poweroff shell dump_to_rootfs' -- "$cur" ) )
+           	         return 0
+                         ;;
+        esac
+	COMPREPLY=( $(compgen -W "${OPTS[*]}" -- $cur) )
+        return 0
+} 
+complete -F kdump_config kdump-config
