@@ -1,0 +1,337 @@
+#! /usr/bin/python
+# kdump-config.py is a cmdline tool to display and manipulate 
+# configuration information of /etc/kdump.conf
+# Author: Kenneth D'souza <kdsouza@redhat.com>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+
+import sys
+import os
+import stat
+import argparse
+import subprocess
+
+CONFIG_FILE = "/etc/kdump.conf"
+
+# Filter comments and optional settings.
+def filter_data(data):
+    comments = []
+    data_without_comments = []
+    for line in data:
+        line = line.strip()
+        if line.startswith('#'):
+            comments.append(line)
+        else:
+            data_without_comments.append(line)
+    return comments, data_without_comments
+
+# Get only unique data, avoids duplicate.
+def unique(data_without_comments, option):
+    unique_data = set()
+    for line in data_without_comments:
+        if len(line.split()) > 1:
+            if line.startswith(
+                ("path", "core_collector", "raw", "nfs", "ssh", "kdump_post",
+                 "kdump_pre", "extra_bins", "extra_modules", "sshkey",
+                 "default", "debug_mem_level", "force_rebuild",
+                 "force_no_rebuild", "dracut_args", "fence_kdump_args",
+                 "fence_kdump_nodes", "ext2", "ext3", "ext4", "btfs", "minix",
+                 "xfs")):
+                if line not in unique_data and not line.startswith(option + ' '):
+                    if option == "ssh":
+                        if not line.startswith(
+                            ("nfs", "raw", "ext4", "ext3", "ext2",
+                             "xfs", "btrfs", "minix")):
+                            unique_data.add(line)
+                    elif option == "nfs":
+                        if not line.startswith(
+                            ("ssh", "raw", "ext4", "ext3", "ext2", "xfs",
+                             "btrfs", "minix")):
+                            unique_data.add(line)
+                    elif option == "raw":
+                        if not line.startswith(
+                            ("nfs", "ssh", "ext4", "ext3", "ext2", "xfs",
+                             "btrfs", "minix")):
+                            unique_data.add(line)
+                    elif option in ("ext2", "ext3", "ext4", "xfs", "btrfs",
+                                     "minix"):
+                        if not line.startswith(("ssh", "nfs", "raw")):
+                            unique_data.add(line)
+                    else:
+                        unique_data.add(line)
+    return unique_data
+
+# We cannot have both the options set to be 1.
+def check_for_mutual_exculsive(unique_data):
+    for line in unique_data:
+        if line.startswith("force_no_rebuild") or line.startswith(
+                "force_rebuild"):
+            optional = line.split()[1]
+            if optional == value == "1":
+                print("force_no_rebuild and force_rebuild cannot be 1 at the same time.")
+                return True
+    return False
+
+# Check if ssh server is set, if not give warning.
+def checks_for_ssh(unique_data):
+    for line in unique_data:
+        if line.find("ssh") != -1:
+            return True
+    return False
+
+# Write changes to the file with comments, unique data and optional
+# settings given by the user.
+def replace_value_write(comments, unique_data, option, value, unset_value):
+    try:
+        with open(CONFIG_FILE, "w") as file_write:
+            for item in comments:
+                file_write.write("%s\n" % item)
+            for i in range(len(unique_data)):
+                file_write.write("%s\n" % unique_data[i])
+            if not unset_value:
+                append_txt = ("%s %s\n" % (option, value))
+                file_write.write("%s" % append_txt)
+    except IOError as reason:
+        print("You need to have root privileges to run this option.")
+        print("%s" % reason)
+
+# Read the file only once and save the data.
+def check(CONFIG_FILE, option, value, unset_value):
+    with open(CONFIG_FILE, "r") as file_read:
+        data = file_read.readlines()
+        comments, data_without_comments = filter_data(data)
+        unique_data = list(unique(data_without_comments, option))
+        unique_data = list(filter(None, unique_data))
+        if option == "force_no_rebuild" or option == "force_rebuild" and value == "1":
+            result = check_for_mutual_exculsive(unique_data)
+            if result:
+                sys.exit(1)
+        if option == "sshkey" and unset_value==False:
+            result_ssh = checks_for_ssh(unique_data)
+            if not result_ssh:
+                print("Warning: Remember to add an entry for ssh")
+        replace_value_write(comments, unique_data, option, value, unset_value)
+
+# Check if the device is valid, check the option passed and work accordingly:
+def check_device(option, value):
+    try:
+        if not stat.S_ISBLK(os.lstat(value).st_mode):
+            print("not a valid device '%s'" % value)
+        elif option == "raw":
+            check(CONFIG_FILE, option, args.raw, False)
+        else:
+            cmd = subprocess.Popen(
+                "lsblk --nodeps -p -n -o FSTYPE,UUID %s " % (value),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                shell=True)
+            option = cmd.communicate()[0].strip().decode()
+            fstype, UUID = option.split()
+            if fstype in ("ext2", "ext3", "ext4", "xfs", "btrfs", "minix"):
+                check(CONFIG_FILE, fstype, "UUID=" + UUID, False)
+            else:
+                print("Filesystem '%s' not supported." % fstype)
+    except ValueError:
+        print("'%s' does not contain a valid Filesystem." % value)
+    except Exception:
+        print("not a valid device '%s'" % value)
+
+# Check if nfs dump target is mounted:
+def check_mnt(nfs_mount):
+    cmd = subprocess.Popen(
+        "findmnt -t nfs,nfs4 %s -o SOURCE -n " % (nfs_mount),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        shell=True)
+    option = cmd.communicate()[0].strip().decode()
+    if not option.strip():
+        print("Error: Dump target '%s' is probably not mounted or valid" %
+              nfs_mount)
+    else:
+        check(CONFIG_FILE, "nfs", option, False)
+
+# Check if binary/script exist and is executable.
+def check_file(value):
+    if not os.path.isfile(value):
+        exit("Invalid file '%s'" % value)
+    else:
+        if not os.access(value, os.X_OK):
+            exit("'%s' file is not an executable." % value)
+    check(CONFIG_FILE, option, value, False)
+
+# Display configuration settings from /etc/kdump.conf:
+def display_show_config(data_without_comments):
+    for item in data_without_comments:
+        if item.strip():
+           print(item)
+
+# Check if kdump config file exists.
+try:
+    lines = open(CONFIG_FILE).readlines()
+except IOError as reason:
+    print("Error reading kdump configuration.")
+    exit("%s" % reason)
+
+# Check if no arguments are given.
+if len(sys.argv) < 2:
+    exit("Please specify an action to perform. \nTry 'kdump-config --help' for more information.")
+
+class MyFormatter(argparse.HelpFormatter):
+    """
+    Corrected _max_action_length for the indenting of subactions
+    """
+    def add_argument(self, action):
+        if action.help is not argparse.SUPPRESS:
+
+            # find all invocations
+            get_invocation = self._format_action_invocation
+            invocations = [get_invocation(action)]
+            current_indent = self._current_indent
+            for subaction in self._iter_indented_subactions(action):
+                # compensate for the indent that will be added
+                indent_chg = self._current_indent - current_indent
+                added_indent = 'x'*indent_chg
+                invocations.append(added_indent+get_invocation(subaction))
+            # print('inv', invocations)
+
+            # update the maximum item length
+            invocation_length = max([len(s) for s in invocations])
+            action_length = invocation_length + self._current_indent
+            self._action_max_length = max(self._action_max_length,
+                                          action_length)
+
+            # add the item to the list
+            self._add_item(self._format_action, [action])
+
+formatter_class = lambda prog: MyFormatter(prog, max_help_position=40, width=120)
+
+parser = argparse.ArgumentParser(description="Please specify an action to perform.",prog="kdump-config",formatter_class=formatter_class)
+parser.add_argument("--path", metavar="",help="path represents the file system path in which vmcore will be saved.")
+parser.add_argument("--raw", metavar="",help="specify raw device example: /dev/sdc1")
+parser.add_argument("--nfs", metavar="", help="specify nfs-server example: my.server.com:/export/tmp")
+parser.add_argument("--ssh", metavar="", help="specify ssh server example: user@my.server.com")
+parser.add_argument("--sshkey", metavar="", help="specify the path of the ssh key to use when dumping.")
+parser.add_argument("--showconfig", action="store_true", help="show configuration settings.")
+parser.add_argument("--local_fs", metavar="", help="specify local device example: /dev/myvg/mylv")
+parser.add_argument("--unset", metavar="", help="unset a given option example: path")
+parser.add_argument("--force_no_rebuild", choices=["1", "0"], help="specify 1 to bypass rebuilding of kdump initrd.")
+parser.add_argument("--force_rebuild", choices=["1", "0"],
+    help="specify 1 to force rebuilding kdump initrd every time when kdump service starts.")
+parser.add_argument("--fence_kdump_nodes", nargs='+', metavar="",
+    help="specify cluster node(s) separated by spaces, to send fence_kdump notifications.")
+parser.add_argument("--extra_bins", nargs='+', metavar="",
+    help="specify additional binaries or shell scripts to be included in kdump initrd.")
+parser.add_argument("--extra_modules", nargs='+', metavar="",
+    help="specify additional modules to be included in kdump initrd.")
+parser.add_argument("--kdump_post", metavar="",
+    help="specify a binary/script to be run just after the vmcore dump process terminates.")
+parser.add_argument("--kdump_pre", metavar="",
+    help="specify a binary/script to be run just before the vmcore dump process.")
+parser.add_argument("--default", choices=["reboot", "halt", "poweroff", "shell", "dump_to_rootfs"],
+    help="Action to perform in case dumping to the intended target fails.")
+
+args = parser.parse_args()
+
+if args.default:
+    option = "default"
+    value = args.default
+    check(CONFIG_FILE, option, value, False)
+
+if args.path:
+    option = "path"
+    value = args.path
+    check(CONFIG_FILE, option, value, False)
+
+if args.showconfig:
+    with open(CONFIG_FILE, "r") as file_display:
+        data = file_display.readlines()
+        comments, data_without_comments = filter_data(data)
+        display_show_config(data_without_comments)
+
+if args.raw:
+    option = "raw"
+    device = os.path.realpath(args.raw)
+    check_device(option, device)
+
+if args.force_rebuild:
+    option = "force_rebuild"
+    value = args.force_rebuild
+    check(CONFIG_FILE, option, value, False)
+
+if args.force_no_rebuild:
+    option = "force_no_rebuild"
+    value = args.force_no_rebuild
+    check(CONFIG_FILE, option, value, False)
+
+if args.nfs:
+    option = "nfs"
+    value = args.nfs
+    check_mnt(value)
+
+if args.ssh:
+    option = "ssh"
+    value = args.ssh
+    check(CONFIG_FILE, option, value, False)
+
+if args.sshkey:
+    if not os.path.isfile(args.sshkey):
+        exit("Invalid file '%s'" % args.sshkey)
+    option = "sshkey"
+    value = args.sshkey
+    check(CONFIG_FILE, option, value, False)
+
+if args.local_fs:
+    device = os.path.realpath(args.local_fs)
+    option = "local"
+    check_device(option, device)
+
+if args.unset:
+    option = args.unset
+    value = ""
+    check(CONFIG_FILE, option, value, True)
+
+if args.fence_kdump_nodes:
+    option = "fence_kdump_nodes"
+    value = " ".join(args.fence_kdump_nodes)
+    check(CONFIG_FILE, option, value, False)
+
+if args.extra_bins:
+    option = "extra_bins"
+    for item in args.extra_bins[:]:
+        if not os.path.isfile(item):
+            print("Invalid file '%s'" % item)
+            args.extra_bins.remove(item)
+        else:
+            if not os.access(item, os.X_OK):
+                print("'%s' file is not an executable." % item)
+                args.extra_bins.remove(item)
+    if args.extra_bins:
+        value = " ".join(args.extra_bins)
+        check(CONFIG_FILE, option, value, False)
+
+if args.extra_modules:
+    option = "extra_modules"
+    value = " ".join(args.extra_modules)
+    check(CONFIG_FILE, option, value, False)
+
+if args.kdump_post:
+    option = "kdump_post"
+    value = args.kdump_post
+    check_file(value)
+
+if args.kdump_pre:
+    option = "kdump_pre"
+    value = args.kdump_pre
+    check_file(value)
