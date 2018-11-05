@@ -3,6 +3,7 @@ If you're interested in helping, here are some pending tasks.
 ==========================================================================
 
 Include support for /etc/sysconfig/kdump under kdump-config.
-
+Add remaining kdump.conf options(dracut_args, fence_kdump_args and core_collector)
+Support inplace editing so we do not break the origin order of comments and config content.
 
 
